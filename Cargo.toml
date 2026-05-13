@@ -1,5 +1,5 @@
 [package]
-edition = "2018"
+edition = "2024"
 name = "ht16k33"
 version = "0.4.0"
 authors = ["Jason Peacock <jason@jasonpeacock.com>"]
@@ -10,22 +10,17 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/jasonpeacock/ht16k33"
 readme = "README.md"
 
-[badges]
-is-it-maintained-issue-resolution = { repository = "jasonpeacock/ht16k33" }
-is-it-maintained-open-issues = { repository = "jasonpeacock/ht16k33" }
-maintenance = { status = "actively-developed" }
-travis-ci = { repository = "jasonpeacock/ht16k33", branch = "master" }
-
 [features]
 default = ["std"]
 std = []
 
 [dependencies]
-bitflags           = "1.0"
-embedded-hal       = "0.2"
+bitflags           = "2.11"
+embedded-hal       = "1.0"
+log = { version = "0.4.29", default-features = false }
 serde              = { version = "1.0", optional = true, features = ["derive"] }
 
 [dev-dependencies]
 failure            = "0.1"
-embedded-hal-mock  = "0.4"
-version-sync       = "0.6"
+embedded-hal-mock  = { version = "0.11", default-features = false, features = ["eh1"] }
+version-sync       = "0.9"

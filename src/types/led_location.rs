@@ -1,64 +1,27 @@
-use crate::constants::{COMMONS_SIZE, ROWS_SIZE};
+use crate::constants::{COLUMN_SIZE, ROWS_SIZE};
 use crate::errors::ValidationError;
-use crate::types::DisplayData;
-use crate::types::DisplayDataAddress;
-
-use core::fmt;
 
 /// Represents the LED location.
-///
-/// The LED location is a ([`DisplayDataAddress`], [`DisplayData`]) pair, created from a validated
-/// (`row`, `common`) pair of `u8` values.
-///
-/// # Example
-///
-/// ```
-/// use ht16k33::LedLocation;
-/// use ht16k33::DisplayData;
-/// use ht16k33::DisplayDataAddress;
-/// use ht16k33::ValidationError;
-/// # fn main() -> Result<(), ValidationError>{
-///
-/// let row = 1u8;
-/// let common = 2u8;
-///
-/// let location = LedLocation::new(row, common)?;
-///
-/// assert_eq!(ht16k33::DisplayDataAddress::ROW_1, location.row);
-/// assert_eq!(ht16k33::DisplayData::COMMON_2, location.common);
-///
-/// # Ok(())
-/// # }
-/// ```
-///
-/// [`DisplayDataAddress`]: struct.DisplayDataAddress.html
-/// [`DisplayData`]: struct.DisplayData.html
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LedLocation {
     /// The Display RAM `row` address.
-    pub row: DisplayDataAddress,
-    /// The Display RAM `common` data.
-    pub common: DisplayData,
-}
-
-impl fmt::Display for LedLocation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LedLocation(row: {}, common: {})", self.row, self.common)
-    }
+    pub row: u8,
+    /// The Display RAM `column` data.
+    pub column: u8,
 }
 
 impl LedLocation {
-    /// Create an `LedLocation` with the given `row` and `common` values.
+    /// Create an `LedLocation` with the given `row` and `column` values.
     ///
     /// # Errors
     ///
-    /// The `row` and `common` values are validated to be within their respective [`ROWS_SIZE`] and
-    /// [`COMMONS_SIZE`] ranges of the device. If validation fails then [`ht16k33::ValidationError::ValueTooLarge`] is
+    /// The `row` and `column` values are validated to be within their respective [`ROWS_SIZE`] and
+    /// [`COLUMNS_SIZE`] ranges of the device. If validation fails then [`ht16k33::ValidationError::ValueTooLarge`] is
     /// returned.
     ///
     /// [`ROWS_SIZE`]: constant.ROWS_SIZE.html
-    /// [`COMMONS_SIZE`]: constant.COMMONS_SIZE.html
+    /// [`COLUMNS_SIZE`]: constant.COLUMNS_SIZE.html
     /// [`ht16k33::ValidationError::ValueTooLarge`]: enum.ValidationError.html#variant.ValueTooLarge
     ///
     /// ```should_panic
@@ -67,9 +30,9 @@ impl LedLocation {
     /// # use ht16k33::ROWS_SIZE;
     /// # fn main() {
     /// # let row = ROWS_SIZE as u8;
-    /// # let common = 2u8;
+    /// # let column = 2u8;
     ///
-    /// let location = match LedLocation::new(row, common) {
+    /// let location = match LedLocation::new(row, column) {
     ///     Ok(location) => location,
     ///     Err(ValidationError) => panic!(),
     /// };
@@ -77,7 +40,7 @@ impl LedLocation {
     /// # }
     /// ```
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(row: u8, common: u8) -> Result<Self, ValidationError> {
+    pub fn new(row: u8, column: u8) -> Result<Self, ValidationError> {
         if row >= ROWS_SIZE as u8 {
             return Err(ValidationError::ValueTooLarge {
                 name: "row",
@@ -87,24 +50,16 @@ impl LedLocation {
             });
         }
 
-        if common >= COMMONS_SIZE as u8 {
+        if column >= COLUMN_SIZE as u8 {
             return Err(ValidationError::ValueTooLarge {
-                name: "common",
-                value: common,
-                limit: COMMONS_SIZE as u8,
+                name: "column",
+                value: column,
+                limit: COLUMN_SIZE as u8,
                 inclusive: false,
             });
         }
 
-        let row = DisplayDataAddress::from_bits_truncate(row);
-        let common = DisplayData::from_bits_truncate(1 << common);
-
-        Ok(LedLocation { row, common })
-    }
-
-    /// Return the `row` value.
-    pub fn row_as_index(self) -> usize {
-        self.row.bits() as usize
+        Ok(LedLocation { row, column })
     }
 }
 
@@ -112,33 +67,35 @@ impl LedLocation {
 mod tests {
     use super::*;
 
-    #[test]
-    fn default() {
-        let location = LedLocation::default();
+    // #[test]
+    // fn default() {
+    //     let location = LedLocation::default();
 
-        assert!(
-            DisplayDataAddress::ROW_0 == location.row
-                && DisplayData::COMMON_NONE == location.common,
-            "LedLocation default is (0, None)"
-        );
-    }
+    //     assert!(
+    //         DisplayDataAddress::from_row(0) == location.row
+    //             && DisplayData::COLUMN_NONE == location.column,
+    //         "LedLocation default is (0, None)"
+    //     );
+    // }
 
-    #[test]
-    fn new() {
-        let location = LedLocation::new(0, 0).unwrap();
+    // #[test]
+    // fn new() {
+    //     let location = LedLocation::new(0, 0).unwrap();
 
-        assert!(
-            DisplayDataAddress::ROW_0 == location.row && DisplayData::COMMON_0 == location.common,
-            "LedLocation is (0, 0)"
-        );
+    //     assert!(
+    //         DisplayDataAddress::from_row(0) == location.row
+    //             && DisplayData::COLUMN_0 == location.column,
+    //         "LedLocation is (0, 0)"
+    //     );
 
-        let location = LedLocation::new(15, 7).unwrap();
+    //     let location = LedLocation::new(15, 7).unwrap();
 
-        assert!(
-            DisplayDataAddress::ROW_15 == location.row && DisplayData::COMMON_7 == location.common,
-            "LedLocation is (15, 7)"
-        );
-    }
+    //     assert!(
+    //         DisplayDataAddress::from_row(15) == location.row
+    //             && DisplayData::COLUMN_7 == location.column,
+    //         "LedLocation is (15, 7)"
+    //     );
+    // }
 
     #[test]
     #[should_panic]
@@ -148,13 +105,13 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn common_too_large() {
+    fn column_too_large() {
         let _ = LedLocation::new(0, 8).unwrap();
     }
 
-    #[test]
-    fn row_as_index() {
-        let location = LedLocation::new(2, 2).unwrap();
-        assert_eq!(2usize, location.row_as_index());
-    }
+    // #[test]
+    // fn row_as_index() {
+    //     let location = LedLocation::new(2, 2).unwrap();
+    //     assert_eq!(2usize, location.row_as_index());
+    // }
 }

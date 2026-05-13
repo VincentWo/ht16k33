@@ -2,19 +2,28 @@
 //!
 //! A mock I2C library to support using the [HT16K33](../struct.HT16K33.html) driver on non-Linux systems that do
 //! not have I2C support.
-use embedded_hal as hal;
+use embedded_hal::{
+    self as hal,
+    i2c::{self, Operation},
+};
+use log::debug;
 
 use core::fmt;
 
-use crate::constants::ROWS_SIZE;
-use crate::types::DisplayDataAddress;
+use crate::{Dimming, Display, constants::ROWS_SIZE};
 
 /// Mock error to satisfy the I2C trait.
 #[derive(Debug)]
-pub struct I2cMockError;
+pub enum I2cMockError {}
 
 #[cfg(feature = "std")]
 impl std::error::Error for I2cMockError {}
+
+impl i2c::Error for I2cMockError {
+    fn kind(&self) -> i2c::ErrorKind {
+        match *self {}
+    }
+}
 
 impl fmt::Display for I2cMockError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -49,103 +58,109 @@ impl I2cMock {
     }
 }
 
-impl hal::blocking::i2c::WriteRead for I2cMock {
-    type Error = I2cMockError;
+impl Default for I2cMock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-    /// `write_read` implementation.
-    ///
-    /// # Arguments
-    ///
-    /// * `_address` - The slave address. Ignored.
-    /// * `bytes` - The command/address instructions to be written.
-    /// * `buffer` - The read results.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use embedded_hal::blocking::i2c::WriteRead;
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # fn main() {
-    /// let mut i2c_mock = I2cMock::new();
-    ///
-    /// let mut read_buffer = [0u8; 16];
-    /// i2c_mock.write_read(0, &[ht16k33::DisplayDataAddress::ROW_0.bits()], &mut read_buffer);
-    ///
-    /// # }
-    /// ```
-    fn write_read(
+impl hal::i2c::ErrorType for I2cMock {
+    type Error = I2cMockError;
+}
+
+impl hal::i2c::I2c for I2cMock {
+    fn transaction(
         &mut self,
         _address: u8,
-        bytes: &[u8],
-        buffer: &mut [u8],
+        operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), Self::Error> {
-        // The `bytes` have the `data_address` command + index to start reading from,
-        // need to clear the command to extract the starting index.
-        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
+        // If there are no operations, we suceed
+        let Some((first, remaining)) = operations.split_first_mut() else {
+            return Ok(());
+        };
 
-        for value in buffer.iter_mut() {
-            *value = self.data_values[data_offset];
+        let Operation::Write(to_write) = first else {
+            // Theoretically one could also do a single write transaction
+            // and then a single read transaction etc. But that is bad style
+            // (i think) and this is only the Mock anyway
+            todo!("A read always needs a write command beforehand");
+        };
 
-            // The HT16K33 supports auto-increment and wrap-around, emulate that.
-            data_offset = (data_offset + 1) % self.data_values.len();
+        // Empty operation => ignore it and treat the remaining ones as
+        // the real ones
+        let Some((command, to_write)) = to_write.split_first() else {
+            return self.transaction(_address, remaining);
+        };
+
+        match *command >> 4 {
+            0b0000 => {
+                let start_address = *command & 0x0F;
+                if !to_write.is_empty() {
+                    copy_to_wrapping_with_offset(
+                        to_write,
+                        &mut self.data_values,
+                        start_address.into(),
+                    );
+                }
+                for operation in remaining {
+                    // I don't think sending more than one command in a single transaction would
+                    // be spec compliant (because the dataseheet says that after a read a NACK + Stop
+                    // is required)
+                    let Operation::Read(buffer) = operation else {
+                        todo!("A single transaction can only contain one command");
+                    };
+
+                    copy_from_wrapping_with_offset(buffer, &self.data_values, start_address.into());
+                }
+            }
+            0b0010 => {
+                if command & 1 == 1 {
+                    debug!("Normal operation mode activated");
+                } else {
+                    debug!("Standby mode activated");
+                }
+            }
+            0b1000 => {
+                let display_status = Display::from_raw(command & 0x0F);
+                debug!("Setting display to {display_status:#?}");
+            }
+            0b1110 => {
+                let dimming_level = Dimming::new(*command & 0x0F);
+                debug!("Setting dimming level to {dimming_level:#?}");
+            }
+            unhandled => unimplemented!("command byte '{unhandled:04b}' not yet implemented"),
         }
 
         Ok(())
     }
 }
 
-impl hal::blocking::i2c::Write for I2cMock {
-    type Error = I2cMockError;
+fn copy_to_wrapping_with_offset(src: &[u8], dst: &mut [u8], offset: usize) {
+    let available = &mut dst[offset..];
 
-    /// `write` implementation.
-    ///
-    /// # Arguments
-    ///
-    /// * `_address` - The slave address. Ignored.
-    /// * `bytes` - The command/address instructions to be written.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use embedded_hal::blocking::i2c::Write;
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # fn main() {
-    /// let mut i2c_mock = I2cMock::new();
-    ///
-    /// // First value is the data address, remaining values are to be written
-    /// // starting at the data address which auto-increments and then wraps.
-    /// let write_buffer = [ht16k33::DisplayDataAddress::ROW_0.bits(), 0u8, 0u8];
-    ///
-    /// i2c_mock.write(0, &write_buffer);
-    ///
-    /// # }
-    /// ```
-    fn write(&mut self, _address: u8, bytes: &[u8]) -> Result<(), Self::Error> {
-        // "Command-only" writes are length 1 and write-only, and cannot be read back,
-        // discard them for simplicity.
-        if bytes.len() == 1 {
-            return Ok(());
-        }
+    if src.len() <= available.len() {
+        available[..src.len()].copy_from_slice(src);
+    } else {
+        available.copy_from_slice(&src[..available.len()]);
+        copy_to_wrapping_with_offset(&src[available.len()..], dst, 0);
+    }
+}
 
-        // Other writes have data, store them.
-        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
-        let data = &bytes[1..];
-
-        for value in data.iter() {
-            self.data_values[data_offset] = *value;
-
-            // The HT16K33 supports auto-increment and wrap-around, emulate that.
-            data_offset = (data_offset + 1) % self.data_values.len();
-        }
-
-        Ok(())
+fn copy_from_wrapping_with_offset(dst: &mut [u8], src: &[u8], offset: usize) {
+    let available = &src[offset..];
+    if dst.len() <= available.len() {
+        dst.copy_from_slice(&available[..dst.len()]);
+    } else {
+        dst[..available.len()].copy_from_slice(available);
+        copy_from_wrapping_with_offset(&mut dst[available.len()..], src, 0);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use embedded_hal::i2c::I2c as _;
+
     use super::*;
-    use hal::blocking::i2c::{Write, WriteRead};
 
     const ADDRESS: u8 = 0;
 
@@ -155,10 +170,10 @@ mod tests {
     }
 
     #[test]
-    fn write() {
+    fn write_no_offset() {
         let mut i2c_mock = I2cMock::new();
 
-        let write_buffer = [super::DisplayDataAddress::ROW_0.bits(), 1u8, 1u8];
+        let write_buffer = [0, 1u8, 1u8];
         i2c_mock.write(ADDRESS, &write_buffer).unwrap();
 
         for value in 0..i2c_mock.data_values.len() {
@@ -182,7 +197,7 @@ mod tests {
         let mut i2c_mock = I2cMock::new();
 
         let offset = 4u8;
-        let write_buffer = [super::DisplayDataAddress::ROW_0.bits() | offset, 1u8, 1u8];
+        let write_buffer = [offset, 1u8, 1u8];
         i2c_mock.write(ADDRESS, &write_buffer).unwrap();
 
         for value in 0..i2c_mock.data_values.len() {
@@ -207,7 +222,7 @@ mod tests {
 
         // Match the data values size, +2 to wrap around, +1 for the data command.
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
-        write_buffer[0] = super::DisplayDataAddress::ROW_0.bits();
+        write_buffer[0] = 0;
 
         // These values should wrap and end up at indexes 0 & 1.
         write_buffer[write_buffer.len() - 1] = 2;
@@ -239,7 +254,7 @@ mod tests {
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
 
         let offset = 4u8;
-        write_buffer[0] = super::DisplayDataAddress::ROW_0.bits() | offset;
+        write_buffer[0] = offset;
 
         // These values should wrap and end up at indexes 4 & 5.
         write_buffer[write_buffer.len() - 1] = 2;
@@ -264,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn write_read() {
+    fn write_read_no_offset() {
         let mut i2c_mock = I2cMock::new();
 
         i2c_mock.data_values[0] = 1;
@@ -272,13 +287,10 @@ mod tests {
 
         let mut read_buffer = [0u8; super::ROWS_SIZE];
         i2c_mock
-            .write_read(
-                ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits()],
-                &mut read_buffer,
-            )
+            .write_read(ADDRESS, &[0], &mut read_buffer)
             .unwrap();
 
+        #[allow(clippy::needless_range_loop)]
         for value in 0..read_buffer.len() {
             match value {
                 0 | 1 => assert_eq!(
@@ -306,13 +318,10 @@ mod tests {
 
         let offset = 2u8;
         i2c_mock
-            .write_read(
-                ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits() | offset],
-                &mut read_buffer,
-            )
+            .write_read(ADDRESS, &[offset], &mut read_buffer)
             .unwrap();
 
+        #[allow(clippy::needless_range_loop)]
         for value in 0..read_buffer.len() {
             match value {
                 0 | 1 => assert_eq!(
@@ -339,13 +348,10 @@ mod tests {
         let mut read_buffer = [0u8; super::ROWS_SIZE + 4];
 
         i2c_mock
-            .write_read(
-                ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits()],
-                &mut read_buffer,
-            )
+            .write_read(ADDRESS, &[0], &mut read_buffer)
             .unwrap();
 
+        #[allow(clippy::needless_range_loop)]
         for value in 0..read_buffer.len() {
             match value {
                 2 | 3 | 18 | 19 => assert_eq!(
@@ -373,13 +379,10 @@ mod tests {
 
         let offset = 4u8;
         i2c_mock
-            .write_read(
-                ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits() | offset],
-                &mut read_buffer,
-            )
+            .write_read(ADDRESS, &[offset], &mut read_buffer)
             .unwrap();
 
+        #[allow(clippy::needless_range_loop)]
         for value in 0..read_buffer.len() {
             match value {
                 // The indexes will be 12/13 b/c the data values are at 1/2, but the read is offset

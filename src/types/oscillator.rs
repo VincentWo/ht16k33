@@ -1,34 +1,19 @@
-use bitflags::bitflags;
-use core::fmt;
-
-bitflags! {
-    /// System oscillator setup and control.
-    pub struct Oscillator: u8 {
-        /// Command to set system setup.
-        const COMMAND = 0b0010_0000;
-        /// Normal operation mode.
-        const ON = 0b0000_0001;
-        /// Standby mode.
-        ///
-        /// *This is the Power-on Reset default.*
-        const OFF = 0b0000_0000;
-    }
+/// System oscillator setup and control.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Oscillator {
+    /// Normal operation mode.
+    On = 0b0000_0001,
+    /// Standby mode.
+    ///
+    /// *This is the Power-on Reset default.*
+    #[default]
+    Off = 0b0000_0000,
 }
 
-impl Default for Oscillator {
-    fn default() -> Oscillator {
-        Oscillator::OFF
-    }
-}
-
-impl fmt::Display for Oscillator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Oscillator::COMMAND => write!(f, "Oscillator::COMMAND"),
-            Oscillator::ON => write!(f, "Oscillator::ON"),
-            Oscillator::OFF => write!(f, "Oscillator::OFF"),
-            _ => write!(f, "Oscillator::{:#10b}", self.bits()),
-        }
+impl Oscillator {
+    pub(crate) fn as_command(&self) -> u8 {
+        (0b0010 << 4) | *self as u8
     }
 }
 
@@ -39,7 +24,7 @@ mod tests {
     #[test]
     fn default() {
         assert_eq!(
-            Oscillator::OFF,
+            Oscillator::Off,
             Oscillator::default(),
             "Oscillator default is OFF"
         );

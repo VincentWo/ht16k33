@@ -1,44 +1,42 @@
-use bitflags::bitflags;
-use core::fmt;
-
-bitflags! {
-    /// The LED display state.
-    ///
-    /// The LEDs can be all off (default), all on, or all blinking at 1/2Hz, 1Hz, or 2Hz.
-    pub struct Display: u8 {
-        /// Command to set the display.
-        const COMMAND = 0b1000_0000;
-        /// Display on; blinking off.
-        const ON = 0b0000_0001;
-        /// Display off.
-        ///
-        /// *This is the Power-on Reset default.*
-        const OFF = 0b0000_0000;
-        /// Display on; blinking @ 0.5Hz.
-        const HALF_HZ = 0b0000_0110 | Self::ON.bits;
-        /// Display on; blinking @ 1Hz.
-        const ONE_HZ = 0b0000_0100 | Self::ON.bits;
-        /// Display on; blinking @ 2Hz.
-        const TWO_HZ = 0b0000_0010 | Self::ON.bits;
-    }
+/// The LED display state.
+///
+/// The LEDs can be all off (default), all on, or all blinking at 1/2Hz, 1Hz, or 2Hz.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Display {
+    /// Display off.
+    /// *This is the Power-on Reset default.*
+    #[default]
+    Off = 0b0000,
+    /// Display on; blinking off.
+    On = 0b0001,
+    /// Display on; blinking @ 2Hz.
+    BlinkingTwoHz = 0b0011,
+    /// Display on; blinking @ 1Hz.
+    BlinkingOneHz = 0b0101,
+    /// Display on; blinking @ 0.5Hz.
+    BlinkingHalfHz = 0b0111,
 }
 
-impl Default for Display {
-    fn default() -> Display {
-        Display::OFF
+impl Display {
+    /// Get the command to set the corresponding state via I2C
+    pub(crate) fn as_command(self) -> u8 {
+        (0b1000 << 4) | self as u8
     }
-}
 
-impl fmt::Display for Display {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Display::COMMAND => write!(f, "Display::COMMAND"),
-            Display::ON => write!(f, "Display::ON"),
-            Display::OFF => write!(f, "Display::OFF"),
-            Display::HALF_HZ => write!(f, "Display::HALF_HZ"),
-            Display::ONE_HZ => write!(f, "Display::ONE_HZ"),
-            Display::TWO_HZ => write!(f, "Display::TWO_HZ"),
-            _ => write!(f, "Display::{:#10b}", self.bits()),
+    pub(crate) fn from_raw(raw: u8) -> Self {
+        // Only three bits matter
+        let raw = raw & 0b0111;
+        if raw & 0b1 == 0 {
+            Display::Off
+        } else {
+            match raw >> 1 {
+                0b00 => Display::On,
+                0b01 => Display::BlinkingTwoHz,
+                0b10 => Display::BlinkingOneHz,
+                0b11 => Display::BlinkingHalfHz,
+                _ => unreachable!(),
+            }
         }
     }
 }
@@ -49,16 +47,6 @@ mod tests {
 
     #[test]
     fn default() {
-        assert_eq!(Display::OFF, Display::default(), "Display default is OFF");
-    }
-
-    #[test]
-    fn blink_includes_on() {
-        assert!(
-            Display::HALF_HZ.contains(Display::ON),
-            "HALF_HZ includes ON"
-        );
-        assert!(Display::ONE_HZ.contains(Display::ON), "ONE_HZ includes ON");
-        assert!(Display::TWO_HZ.contains(Display::ON), "TWO_HZ includes ON");
+        assert_eq!(Display::Off, Display::default(), "Display default is OFF");
     }
 }

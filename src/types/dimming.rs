@@ -1,76 +1,14 @@
-use crate::errors::ValidationError;
-use bitflags::bitflags;
-use core::fmt;
-
-bitflags! {
-    /// Display dimming.
-    ///
-    /// The whole display is dimmed via PWM @ N/16 duty cycle; individual LEDs cannot be dimmed independently.
-    ///
-    /// The value should be in the inclusive range [`BRIGHTNESS_MIN`] to [`BRIGHTNESS_MAX`]. Use the [`from_u8`]
-    /// helper to create a validated `Dimming` value.
-    ///
-    /// [`BRIGHTNESS_MIN`]: struct.Dimming.html#associatedconstant.BRIGHTNESS_MIN
-    /// [`BRIGHTNESS_MAX`]: struct.Dimming.html#associatedconstant.BRIGHTNESS_MAX
-    /// [`from_u8`]: struct.Dimming.html#method.from_u8
-    pub struct Dimming: u8 {
-        /// Command to set the digital dimming.
-        const COMMAND = 0b1110_0000;
-        /// Minimum brightness @ 1/16 PWM duty cycle. (Same as `BRIGHTNESS_1_16`)
-        const BRIGHTNESS_MIN = Self::BRIGHTNESS_1_16.bits;
-        /// Brightness @ 1/16 PWM duty cycle.
-        const BRIGHTNESS_1_16 = 0;
-        /// Brightness @ 2/16 PWM duty cycle.
-        const BRIGHTNESS_2_16 = 1;
-        /// Brightness @ 3/16 PWM duty cycle.
-        const BRIGHTNESS_3_16 = 2;
-        /// Brightness @ 4/16 PWM duty cycle.
-        const BRIGHTNESS_4_16 = 3;
-        /// Brightness @ 5/16 PWM duty cycle.
-        const BRIGHTNESS_5_16 = 4;
-        /// Brightness @ 6/16 PWM duty cycle.
-        const BRIGHTNESS_6_16 = 5;
-        /// Brightness @ 7/16 PWM duty cycle.
-        const BRIGHTNESS_7_16 = 6;
-        /// Brightness @ 8/16 PWM duty cycle.
-        const BRIGHTNESS_8_16 = 7;
-        /// Brightness @ 9/16 PWM duty cycle.
-        const BRIGHTNESS_9_16 = 8;
-        /// Brightness @ 10/16 PWM duty cycle.
-        const BRIGHTNESS_10_16 = 9;
-        /// Brightness @ 11/16 PWM duty cycle.
-        const BRIGHTNESS_11_16 = 10;
-        /// Brightness @ 12/16 PWM duty cycle.
-        const BRIGHTNESS_12_16 = 11;
-        /// Brightness @ 13/16 PWM duty cycle.
-        const BRIGHTNESS_13_16 = 12;
-        /// Brightness @ 14/16 PWM duty cycle.
-        const BRIGHTNESS_14_16 = 13;
-        /// Brightness @ 15/16 PWM duty cycle.
-        const BRIGHTNESS_15_16 = 14;
-        /// Brightness @ 16/16 PWM duty cycle.
-        const BRIGHTNESS_16_16 = 15;
-        /// Maximum brightness @ 16/16 PWM duty cycle. (Same as `BRIGHTNESS_16_16`)
-        ///
-        /// *This is the Power-on Reset default.*
-        const BRIGHTNESS_MAX = Self::BRIGHTNESS_16_16.bits;
-    }
-}
+/// Display dimming.
+///
+/// The whole display is dimmed via PWM @ (N + 1)/16 duty cycle; individual LEDs cannot be dimmed independently.
+///
+/// The value has to be in the inclusive range 0..15.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dimming(u8);
 
 impl Default for Dimming {
     fn default() -> Dimming {
-        Dimming::BRIGHTNESS_MAX
-    }
-}
-
-impl fmt::Display for Dimming {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Dimming::COMMAND => write!(f, "Dimming::COMMAND"),
-            Dimming::BRIGHTNESS_MIN => write!(f, "Dimming::BRIGHTNESS_MIN"),
-            Dimming::BRIGHTNESS_MAX => write!(f, "Dimming::BRIGHTNESS_MAX"),
-            _ => write!(f, "Dimming::{:#10b}", self.bits()),
-        }
+        Self::BRIGHTNESS_MAX
     }
 }
 
@@ -79,10 +17,10 @@ impl Dimming {
     ///
     /// *NOTE: The brightness values are 0-indexed, e.g. `0u8` is equivalent to `1/16`, and `15u8` is `16/16`.*
     ///
-    /// # Errors
+    /// # Panics
     ///
     /// The value is validated to be in the inclusive range [`BRIGHTNESS_MIN`] to [`BRIGHTNESS_MAX`]. If
-    /// the given `u8` value is too large then [`ht16k33::ValidationError::ValueTooLarge`] is returned.
+    /// the given `u8` value is too large then this function panics.
     ///
     /// # Example
     ///
@@ -91,9 +29,9 @@ impl Dimming {
     /// # use ht16k33::ValidationError;
     /// # fn main() -> Result<(), ValidationError> {
     ///
-    /// let brightness = Dimming::from_u8(1u8)?;
+    /// let brightness = Dimming::new(1);
     ///
-    /// assert_eq!(1u8, brightness.bits());
+    /// assert_eq!(1u8, brightness.raw());
     ///
     /// # Ok(())
     /// # }
@@ -109,30 +47,31 @@ impl Dimming {
     /// // Greater than the `BRIGHTNESS_MAX` value of `15u8`.
     /// let value = 16u8;
     ///
-    /// let brightness = match Dimming::from_u8(value) {
-    ///     Ok(brightness) => brightness,
-    ///     Err(ValidationError) => panic!(),
-    /// };
-    ///
+    /// let brightness = Dimming::new(value);
     /// # }
     /// ```
     ///
-    /// [`BRIGHTNESS_MIN`]: struct.Dimming.html#associatedconstant.BRIGHTNESS_MIN
-    /// [`BRIGHTNESS_MAX`]: struct.Dimming.html#associatedconstant.BRIGHTNESS_MAX
-    /// [`ht16k33::ValidationError::ValueTooLarge`]: enum.ValidationError.html#variant.ValueTooLarge
-    // TODO Implement as TryFrom<u8> once it's available in `stable`.
-    pub fn from_u8(value: u8) -> Result<Self, ValidationError> {
-        if value > Dimming::BRIGHTNESS_MAX.bits() {
-            return Err(ValidationError::ValueTooLarge {
-                name: "dimming",
-                value,
-                limit: Dimming::BRIGHTNESS_MAX.bits(),
-                inclusive: true,
-            });
+    pub fn new(value: u8) -> Self {
+        if value <= 15 {
+            Self(value)
+        } else {
+            panic!("Dimming value has to be <=15, was '{value}'")
         }
-
-        Ok(Dimming::from_bits_truncate(value))
     }
+
+    /// Return the raw value of the brightness level
+    pub fn raw(self) -> u8 {
+        self.0
+    }
+
+    pub(crate) fn as_command(self) -> u8 {
+        (0b1110 << 4) | self.0
+    }
+
+    /// Minimum brightness @ 1/16 PWM
+    pub const BRIGHTNESS_MIN: Self = Dimming(0);
+    /// Maximum brightness @ 16/16 PWM
+    pub const BRIGHTNESS_MAX: Self = Dimming(15);
 }
 
 #[cfg(test)]
@@ -142,18 +81,18 @@ mod tests {
     #[test]
     fn brightness_min() {
         assert_eq!(
-            Dimming::BRIGHTNESS_1_16,
+            Dimming::new(0),
             Dimming::BRIGHTNESS_MIN,
-            "Dimming MIN brightness matches 1/16 value"
+            "Dimming MIN brightness doesn't match 1/16 value"
         );
     }
 
     #[test]
     fn brightness_max() {
         assert_eq!(
-            Dimming::BRIGHTNESS_16_16,
+            Dimming::new(15),
             Dimming::BRIGHTNESS_MAX,
-            "Dimming MAX brightness matches 16/16 value"
+            "Dimming MAX brightness doesn't match 16/16 value"
         );
     }
 
@@ -169,14 +108,14 @@ mod tests {
     #[test]
     fn from_u8() {
         for value in 0u8..16 {
-            let dimming = Dimming::from_u8(value).unwrap();
-            assert_eq!(value, dimming.bits());
+            let dimming = Dimming::new(value);
+            assert_eq!(value, dimming.0);
         }
     }
 
     #[test]
     #[should_panic]
     fn from_u8_too_large() {
-        let _ = Dimming::from_u8(16u8).unwrap();
+        Dimming::new(16u8);
     }
 }
